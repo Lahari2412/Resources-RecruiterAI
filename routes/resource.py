@@ -55,9 +55,20 @@ from fastapi import APIRouter, HTTPException, status
 from models.resource import Resource
 from config.db import conn
 from schemas.resource import resourceEntity, resourcesEntity
-from pymongo.errors import DuplicateKeyError
+from fastapi.responses import JSONResponse
+
+
 
 resource = APIRouter(prefix="/api/v1/resource")
+
+def get_next_sequence_value(sequence_name):
+    seq = conn.local.counters.find_one_and_update(
+        {"_id": sequence_name},
+        {"$inc": {"sequence_value": 1}},
+        upsert=True,
+        return_document=True
+    )
+    return seq["sequence_value"]
 
 @resource.get('/')
 async def find_all_resources():
@@ -70,23 +81,21 @@ async def find_all_resources():
             detail="No resources found"
         )
 
+
 @resource.post('/')
 async def create_resource(resource: Resource):
     try:
-        resource_dict = dict(resource)
+        resource_dict = resource.dict()
+        resource_dict["id"] = get_next_sequence_value("resource_id")
         conn.local.resource.insert_one(resource_dict)
-        return resourceEntity(resource_dict)
-    except DuplicateKeyError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Resource with this identifier already exists"
-        )
+        return JSONResponse(status_code=status.HTTP_201_CREATED, content=resourceEntity(resource_dict))
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating the resource"
         )
-
+    
 @resource.put('/{id}')
 async def update_resource(id: int, resource: Resource):
     resource_dict = dict(resource)
